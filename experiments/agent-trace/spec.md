@@ -1,6 +1,6 @@
 # agent-trace：从最简实现观测 Agent 系统的完整链路
 
-Status: needs-triage（初步方案，待评审）
+Status: ready-for-agent（方案评审完成；LLM seam 决策已定，待拆实现 issues）
 
 ## Problem Statement
 
@@ -19,10 +19,9 @@ experiments/agent-trace/
 ├── agent/           # ReAct 决策循环（核心学习点）
 │   ├── agent.go     #   Agent 类型：持有 LLM 与工具注册表，驱动多轮循环
 │   └── agent_test.go
-├── llm/             # 模型 seam（先以可编程 Fake 验证，真实接入待单独原型）
-│   ├── message.go   #   Message 角色/内容模型（模型域对象）
-│   ├── llm.go       #   LLM 接口：输入消息历史，输出一条模型消息
-│   └── fake.go      #   确定性脚本 Fake，按消息历史返回 tool_call 或最终答案
+├── llm/             # 模型 seam：判别式消息模型 + LLM 接口（真实接入待单独原型）
+│   ├── message.go   #   Message 判别接口 + User/Assistant/ToolResult 三种消息 + ToolCall
+│   └── llm.go       #   LLM 接口（输出 AssistantMessage）+ Func 函数适配器
 ├── tool/            # 工具 seam
 │   ├── tool.go      #   Tool 接口 + Registry 注册/分发
 │   └── knowledge.go #   示例工具：查询进程内静态知识源（首版无 DB/HTTP）
@@ -34,20 +33,28 @@ experiments/agent-trace/
 ```text
 main.Run
 └── agent.Agent.Run(prompt)
-    ├── round 1: llm.Generate(messages)          → assistant: tool_call(knowledge_search)
-    ├──          tool.Registry.Dispatch(tool_call) → knowledge 工具执行，返回结果
-    ├──          回填 role=tool 消息到历史
-    ├── round 2: llm.Generate(messages)          → assistant: 最终回答（结束）
-    └── 返回最终消息与完整消息历史（可观测产物）
+    ├── user 消息进入历史
+    ├── round 1: llm.Generate(history)  → AssistantMessage{ToolCall: 调用 knowledge_search}
+    ├──          Registry.Dispatch(ToolCall) → knowledge 工具执行，返回结果或错误
+    ├──          agent 回填 ToolResultMessage{ToolCallID, IsError} 到历史
+    ├── round 2: llm.Generate(history)  → AssistantMessage{文本回答, 无 ToolCall}（自然结束）
+    └── 返回最终文本与完整消息历史（可观测产物）
 ```
 
-边界行为：最大轮数上限、工具不存在、工具执行错误、模型空响应——都结束循环并携带上下文返回错误。
+边界行为分两层：
+- 工具执行层（工具不存在、工具执行错误）：不终止循环。回填 IsError=true 的
+  ToolResultMessage，由模型在下一轮决定换工具、修正参数或放弃（真实 Agent 语义，
+  依据 pigo ExecuteToolCalls：every failure mode → error tool result）。
+- 循环层（模型空响应、超过最大轮数、context 取消）：结束循环，返回携带轮次
+  与历史上下文信息的 Go error。
 
 ## Module Decisions
 
 - 目录内子包归属同一个根 module（`harukizmoe/go-exp`），互不导入其他实验目录；抽象保留在本实验内——当前只有这一个真实调用方，不提取共享包。
 - seam 数量保持最小：`llm.LLM` 与 `tool.Tool` 两个接口，加 `tool.Registry` 一个分发点。Agent 只依赖接口，不依赖 Fake 实现；测试经接口注入确定性组件。
-- `Message` 归口 `llm` 包：它是模型域的输入输出对象；`tool` 包只处理 `ToolCall`/`ToolResult`，由 `agent` 把工具结果转换并回填为 `role=tool` 消息。
+- 消息模型归口 `llm` 包且采用 role 判别式：`Message` 密封接口 + `UserMessage`/`AssistantMessage`/`ToolResultMessage` 三种具体类型（参照 pigo/pi 线格式；本实验无持久化，不需要判别 JSON 序列化层）。`AssistantMessage.ToolCall` 是单指针（每轮至多一个工具调用，并行 out of scope），保留 `ToolCall{ID,Name,Arguments}` 规范结构以关联回填；`tool` 包不依赖 `llm`，由 `agent` 把执行结果合成 `ToolResultMessage` 回填历史。
+- `llm.LLM.Generate(ctx, history) (AssistantMessage, error)`：模型域输出角色唯一，返回类型直接收窄为 `AssistantMessage`，循环侧无需再判角色。Fake 形态为 `llm.Func` 函数适配器——测试与演示用闭包构造确定性脚本，不设独立 fake.go，也不引入脚本 DSL。
+- 工具执行层错误（工具不存在、执行失败）不进 Go error 路径：`agent` 捕获后回填 `IsError=true` 的结果消息，循环继续；`IsError=true` 时 `Content` 携带错误描述。
 - `agent.Run(ctx, prompt) (answer string, history []llm.Message, err error)` 是主要测试 seam，调用方传入 `context.Context`；取消/超时路径可验证。
 - 知识工具首版查询进程内静态键值片段，与 `langfuse-otel` 的知识片段解耦，不引入数据库或 HTTP。
 
@@ -63,22 +70,23 @@ main.Run
 2. 作为学习者，我希望 Agent 循环是真实的（消息历史随轮次增长、由模型输出决定下一步），以便理解 ReAct 决策循环。
 3. 作为学习者，我希望模型请求工具时工具经注册表分发执行，以便看到"模型决策"与"工具执行"两个边界。
 4. 作为学习者，我希望工具结果以 role=tool 消息回填并进入下一轮模型输入，以便观察 Agent 从工具回到模型的完整回路。
-5. 作为学习者，我希望看到工具不存在、工具失败、超轮数、空响应等退出路径，以便理解 Agent 的失败语义。
+5. 作为学习者，我希望看到工具不存在、工具失败如何作为错误结果回填给模型（IsError），以及超轮数、空响应等真正的退出路径，以便理解 Agent 分层失败语义。
 6. 作为学习者，我希望每个模块（agent/llm/tool）有独立测试且通过接口注入确定性组件，以便理解 seam 与依赖倒置。
-7. 作为维护者，我希望 Fake LLM 行为可编程（脚本驱动），以便用同一套接口验证正常、重试与错误路径。
+7. 作为维护者，我希望 Fake LLM 以闭包（llm.Func）提供确定性输出，以便用同一套接口验证正常、错误回填与退出路径。
 8. 作为维护者，我希望本实验不修改 `langfuse-otel` 的任何文件，以便两个学习成果各自保持完整基线。
 
-## Open Decisions（后续单独原型验证）
+## Open Decisions
 
-- LLM seam 的精确边界：消息格式、是否保留 tool_calls 原始结构、Fake 脚本的形态；原型将先验证这一契约再固化为接口。
+- ~~LLM seam 的精确边界~~（已定，见 Module Decisions）：消息格式采用 role 判别式（UserMessage / AssistantMessage / ToolResultMessage）；保留 tool_calls 的规范结构（单 ToolCall 指针 + ID/Name/Arguments）；Fake 形态为 `llm.Func` 闭包。依据：pigo/pi 线格式与本实验教学目标。
 - 真实 LLM 接入候选（本地网关或远端 API）与适配成本——原型后决策，本实验默认零网络。
-- 是否把链路叠加 OTel Span 树打印。
+- 是否把链路叠加 OTel Span 树打印（复用 langfuse-otel 已验证的内存 exporter）——实现完成后评估。
 
 ## Testing Decisions
 
 - 正常路径：多轮 tool_call → 回填 → 最终回答，验证答案与消息历史不变式（顺序、角色交替、工具结果被第二轮回填）。
-- 错误路径：工具不存在、工具返回错误、超过最大轮数、模型返回空响应，验证返回错误且不泄漏 goroutine。
-- Fake LLM 用脚本表驱动：每步按消息历史选择下一输出；测试直接构造脚本覆盖各分支。
+- 工具执行层路径：工具不存在、工具返回错误 → 验证回填 IsError=true 的 ToolResultMessage（内容含错误描述、紧跟对应 ToolCall），且 Fake 能"看到"该结果并据此换工具或给出放弃回答。
+- 循环层错误路径：超过最大轮数、模型返回空响应、context 取消 → 验证返回携带轮次与历史上下文的 Go error，且不泄漏 goroutine。
+- Fake LLM 以闭包表驱动：`llm.Func` 按消息历史选择下一输出；测试直接构造闭包覆盖正常、错误回填与退出分支。
 - 并发/取消：`go test -race`；`Run` 接受 Context，超时路径有测试。
 - 完成实现后运行：`go test -race ./experiments/agent-trace/...`、`go vet ./...`、`go run ./experiments/agent-trace`。
 
@@ -91,7 +99,6 @@ main.Run
 
 ## Next Steps
 
-1. 评审本 spec 并创建 GitHub Issue 追踪（本文档链接进 Issue 正文）。
-2. LLM seam 单独原型设计（决策 open decision 1）。
-3. 依次实现 tool → agent → main 编排与演示。
-4. 测试、README、验证命令收尾。
+1. 按依赖顺序实现：llm 包 → tool 包 → agent 包 → main 编排与演示（对应拆分实现 issues，见 issue #1）。
+2. 每包独立测试（go test -race），README 补齐。
+3. 收尾验证：go test -race ./experiments/agent-trace/...、go vet ./...、go run ./experiments/agent-trace。
