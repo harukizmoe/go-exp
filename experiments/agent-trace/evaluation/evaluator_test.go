@@ -80,3 +80,63 @@ func TestCalculatorExpressionIgnoresWhitespace(t *testing.T) {
 		t.Fatalf("calculator expression should ignore whitespace")
 	}
 }
+
+func TestPhase3NotFoundAnswerVariantPasses(t *testing.T) {
+	dataset, err := LoadDataset("../evaldata/cases.jsonl")
+	if err != nil {
+		t.Fatalf("LoadDataset() error = %v", err)
+	}
+
+	var item Case
+	for _, candidate := range dataset.Cases {
+		if candidate.ID == "edge-002" {
+			item = candidate
+			break
+		}
+	}
+	if item.ID == "" {
+		t.Fatal("edge-002 case not found")
+	}
+
+	result := &agent.RunResult{
+		Answer: "没有找到商品 P999，因此无法查询价格。",
+		Turns:  2,
+		ToolCalls: []agent.ToolCallRecord{{
+			Name:      "get_product",
+			Arguments: json.RawMessage(`{"product_id":"P999"}`),
+		}},
+	}
+	if got := Evaluate(item, result, nil); !got.Passed {
+		t.Fatalf("edge-002 natural not-found answer should pass: %+v", got)
+	}
+}
+
+func TestPhase3VerifiesExplicitOrderRequest(t *testing.T) {
+	dataset, err := LoadDataset("../evaldata/cases.jsonl")
+	if err != nil {
+		t.Fatalf("LoadDataset() error = %v", err)
+	}
+
+	var item Case
+	for _, candidate := range dataset.Cases {
+		if candidate.ID == "edge-001" {
+			item = candidate
+			break
+		}
+	}
+	if item.ID == "" {
+		t.Fatal("edge-001 case not found")
+	}
+
+	result := &agent.RunResult{
+		Answer: "A100 的状态是：已发货。",
+		Turns:  2,
+		ToolCalls: []agent.ToolCallRecord{{
+			Name:      "lookup_order",
+			Arguments: json.RawMessage(`{"order_id":"A100"}`),
+		}},
+	}
+	if got := Evaluate(item, result, nil); !got.Passed {
+		t.Fatalf("edge-001 verified answer should pass: %+v", got)
+	}
+}

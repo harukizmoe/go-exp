@@ -45,14 +45,16 @@ type ObservabilityConfig struct {
 	ExportTimeout      time.Duration
 }
 
-// EvalConfig controls the local benchmark and score upload behavior.
+// EvalConfig controls the local benchmark, Dataset sync, and score upload behavior.
 type EvalConfig struct {
-	DatasetPath  string
-	ReportPath   string
-	RunName      string
-	TraceName    string
-	Environment  string
-	UploadScores bool
+	DatasetPath   string
+	DatasetName   string
+	ReportPath    string
+	RunName       string
+	TraceName     string
+	Environment   string
+	UploadDataset bool
+	UploadScores  bool
 }
 
 func Load() (Config, error) {
@@ -86,12 +88,14 @@ func Load() (Config, error) {
 			ExportTimeout:      10 * time.Second,
 		},
 		Eval: EvalConfig{
-			DatasetPath:  valueOrDefault("EVAL_DATASET_PATH", "experiments/agent-trace/evaldata/cases.jsonl"),
-			ReportPath:   valueOrDefault("EVAL_REPORT_PATH", "experiments/agent-trace/eval-results/latest.json"),
-			RunName:      valueOrDefault("EVAL_RUN_NAME", "baseline-v1"),
-			TraceName:    valueOrDefault("EVAL_TRACE_NAME", "agent-eval"),
-			Environment:  valueOrDefault("EVAL_ENVIRONMENT", "experiment"),
-			UploadScores: true,
+			DatasetPath:   valueOrDefault("EVAL_DATASET_PATH", "experiments/agent-trace/evaldata/cases.jsonl"),
+			DatasetName:   valueOrDefault("EVAL_DATASET_NAME", "go-agent-eval-phase3"),
+			ReportPath:    valueOrDefault("EVAL_REPORT_PATH", "experiments/agent-trace/eval-results/latest.json"),
+			RunName:       valueOrDefault("EVAL_RUN_NAME", "baseline-v1"),
+			TraceName:     valueOrDefault("EVAL_TRACE_NAME", "agent-eval"),
+			Environment:   valueOrDefault("EVAL_ENVIRONMENT", "experiment"),
+			UploadDataset: true,
+			UploadScores:  true,
 		},
 	}
 
@@ -163,6 +167,13 @@ func Load() (Config, error) {
 		}
 	}
 
+	if v := strings.TrimSpace(os.Getenv("EVAL_UPLOAD_DATASET")); v != "" {
+		cfg.Eval.UploadDataset, err = strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse EVAL_UPLOAD_DATASET: %w", err)
+		}
+	}
+
 	if cfg.LLM.BaseURL == "" {
 		return Config{}, errors.New("LLM_BASE_URL is required")
 	}
@@ -174,19 +185,19 @@ func Load() (Config, error) {
 	if cfg.LLM.Temperature < 0 || cfg.LLM.Temperature > 2 {
 		return Config{}, errors.New("LLM_TEMPERATURE must be between 0 and 2")
 	}
-	if strings.TrimSpace(cfg.Eval.DatasetPath) == "" {
-		return Config{}, errors.New("EVAL_DATASET_PATH must not be empty")
+	if strings.TrimSpace(cfg.Eval.DatasetName) == "" {
+		return Config{}, errors.New("EVAL_DATASET_NAME must not be empty")
 	}
 
 	if strings.TrimSpace(cfg.Eval.RunName) == "" {
 		return Config{}, errors.New("EVAL_RUN_NAME must not be empty")
 	}
 
-	if cfg.Eval.UploadScores &&
+	if (cfg.Eval.UploadScores || cfg.Eval.UploadDataset) &&
 		cfg.Observability.Enabled &&
 		cfg.Observability.LangfuseBaseURL == "" {
 		return Config{}, errors.New(
-			"LANGFUSE_BASE_URL is required when EVAL_UPLOAD_SCORES=true",
+			"LANGFUSE_BASE_URL is required when Langfuse upload is enabled",
 		)
 	}
 

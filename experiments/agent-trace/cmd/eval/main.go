@@ -101,6 +101,55 @@ func main() {
 		}
 		scoreSink = scoreClient
 	}
+	var datasetSynced bool
+	if cfg.Eval.UploadDataset && provider != nil {
+		datasetClient, err := langfuse.NewDatasetClient(
+			cfg.Observability.LangfuseBaseURL,
+			cfg.Observability.PublicKey,
+			cfg.Observability.SecretKey,
+			cfg.Observability.ExportTimeout,
+		)
+		if err != nil {
+			fatalf("create Langfuse dataset client: %v", err)
+		}
+
+		items := make([]langfuse.DatasetItem, 0, len(dataset.Cases))
+		for _, item := range dataset.Cases {
+			itemMetadata := map[string]any{
+				"case_id":    item.ID,
+				"category":   item.Metadata.Category,
+				"difficulty": item.Metadata.Difficulty,
+			}
+			if item.Metadata.EvaluationNote != "" {
+				itemMetadata["evaluation_note"] = item.Metadata.EvaluationNote
+			}
+			items = append(items, langfuse.DatasetItem{
+				DatasetName: cfg.Eval.DatasetName,
+				ID:          item.ID,
+				Input: map[string]any{
+					"text": item.Input,
+				},
+				ExpectedOutput: item.Expected,
+				Metadata:       itemMetadata,
+			})
+		}
+
+		_, err = datasetClient.Sync(
+			ctx,
+			cfg.Eval.DatasetName,
+			"Deterministic Phase 3 agent evaluation dataset",
+			map[string]any{
+				"phase":       "3",
+				"source_path": cfg.Eval.DatasetPath,
+				"evaluator":   "deterministic",
+			},
+			items,
+		)
+		if err != nil {
+			fatalf("sync Langfuse dataset: %v", err)
+		}
+		datasetSynced = true
+	}
 
 	if provider != nil {
 		defer func() {
@@ -114,9 +163,10 @@ func main() {
 
 	fmt.Println("Go Agent Eval - Phase 3")
 	fmt.Printf("Run: %s\n", cfg.Eval.RunName)
-	fmt.Printf("Dataset: %s (%d cases)\n", cfg.Eval.DatasetPath, len(dataset.Cases))
-	fmt.Printf("Model: %s\n", cfg.LLM.Model)
+	fmt.Printf("Dataset: %s (%d cases)\n", cfg.Eval.DatasetName, len(dataset.Cases))
+	fmt.Printf("Dataset source: %s\n", cfg.Eval.DatasetPath)
 	fmt.Printf("Langfuse tracing: %t\n", provider != nil)
+	fmt.Printf("Langfuse dataset sync: %t\n", datasetSynced)
 	fmt.Printf("Langfuse scores: %t\n\n", scoreSink != nil)
 
 	startedAt := time.Now()

@@ -39,7 +39,6 @@ func NewProvider(
 	ctx context.Context,
 	cfg ProviderConfig,
 ) (*Provider, error) {
-
 	if strings.TrimSpace(
 		cfg.PublicKey,
 	) == "" ||
@@ -53,13 +52,11 @@ func NewProvider(
 	}
 
 	if cfg.ServiceName == "" {
-		cfg.ServiceName =
-			"go-agent-eval"
+		cfg.ServiceName = "go-agent-eval"
 	}
 
 	if cfg.ServiceVersion == "" {
-		cfg.ServiceVersion =
-			"phase-2"
+		cfg.ServiceVersion = "phase-3"
 	}
 
 	if cfg.ExportTimeout <= 0 {
@@ -71,7 +68,6 @@ func NewProvider(
 		cfg.LangfuseBaseURL,
 		cfg.OTLPTracesEndpoint,
 	)
-
 	if err != nil {
 		return nil, err
 	}
@@ -84,31 +80,29 @@ func NewProvider(
 		),
 	)
 
-	exporter, err :=
-		otlptracehttp.New(
-			ctx,
+	exporter, err := otlptracehttp.New(
+		ctx,
 
-			otlptracehttp.WithEndpointURL(
-				endpoint,
-			),
+		otlptracehttp.WithEndpointURL(
+			endpoint,
+		),
 
-			otlptracehttp.WithHeaders(
-				map[string]string{
-					"Authorization": "Basic " + auth,
+		otlptracehttp.WithHeaders(
+			map[string]string{
+				"Authorization": "Basic " + auth,
 
-					"x-langfuse-ingestion-version": "4",
-				},
-			),
+				"x-langfuse-ingestion-version": "4",
+			},
+		),
 
-			otlptracehttp.WithCompression(
-				otlptracehttp.GzipCompression,
-			),
+		otlptracehttp.WithCompression(
+			otlptracehttp.GzipCompression,
+		),
 
-			otlptracehttp.WithTimeout(
-				cfg.ExportTimeout,
-			),
-		)
-
+		otlptracehttp.WithTimeout(
+			cfg.ExportTimeout,
+		),
+	)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"create Langfuse OTLP exporter: %w",
@@ -163,7 +157,6 @@ func (p *Provider) Tracer() trace.Tracer {
 func (p *Provider) ForceFlush(
 	ctx context.Context,
 ) error {
-
 	if p == nil ||
 		p.tracerProvider == nil {
 
@@ -178,7 +171,6 @@ func (p *Provider) ForceFlush(
 func (p *Provider) Shutdown(
 	ctx context.Context,
 ) error {
-
 	if p == nil ||
 		p.tracerProvider == nil {
 
@@ -194,11 +186,9 @@ func tracesEndpoint(
 	baseURL string,
 	explicit string,
 ) (string, error) {
-
 	if endpoint := strings.TrimSpace(
 		explicit,
 	); endpoint != "" {
-
 		return strings.TrimRight(
 			endpoint,
 			"/",

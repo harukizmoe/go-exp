@@ -42,10 +42,11 @@ type ToolExpectation struct {
 	Arguments map[string]any `json:"arguments,omitempty"`
 }
 
-// Metadata groups cases for filtering and category-level summaries.
+// Metadata 用于分类、汇总和记录评估契约说明。
 type Metadata struct {
-	Category   string `json:"category"`
-	Difficulty string `json:"difficulty,omitempty"`
+	Category       string `json:"category"`
+	Difficulty     string `json:"difficulty,omitempty"`
+	EvaluationNote string `json:"evaluation_note,omitempty"`
 }
 
 // LoadDataset reads and validates one JSONL case per non-empty line.

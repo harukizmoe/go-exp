@@ -7,8 +7,8 @@ func TestPhase3Dataset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadDataset() error = %v", err)
 	}
-	if len(dataset.Cases) != 30 {
-		t.Fatalf("cases = %d, want 30", len(dataset.Cases))
+	if len(dataset.Cases) != 20 {
+		t.Fatalf("cases = %d, want 20", len(dataset.Cases))
 	}
 
 	counts := map[string]int{}
@@ -16,8 +16,8 @@ func TestPhase3Dataset(t *testing.T) {
 		counts[item.Metadata.Category]++
 	}
 	want := map[string]int{
-		"no_tool":             5,
-		"single_tool":         10,
+		"no_tool":             1,
+		"single_tool":         4,
 		"argument_extraction": 5,
 		"multi_tool":          5,
 		"edge_adversarial":    5,
@@ -25,6 +25,12 @@ func TestPhase3Dataset(t *testing.T) {
 	for category, n := range want {
 		if counts[category] != n {
 			t.Fatalf("category %s = %d, want %d", category, counts[category], n)
+		}
+	}
+
+	for _, item := range dataset.Cases {
+		if (item.ID == "edge-001" || item.ID == "edge-005") && item.Metadata.EvaluationNote == "" {
+			t.Fatalf("case %s must document its tool-policy expectation", item.ID)
 		}
 	}
 }
